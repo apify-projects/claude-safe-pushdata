@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { safePushData } from '../../src/gteam-internal/index.js';
+import type { ValidationError } from '../../src/push-data-with-schema-repair/index.js';
 
 vi.mock('apify', () => ({
     Actor: {
@@ -25,20 +26,9 @@ vi.mock('apify-client', () => {
     return { ApifyApiError };
 });
 
-vi.mock('@crawlee/core', () => {
-    class NonRetryableError extends Error {
-        constructor(message: string) {
-            super(message);
-            this.name = 'NonRetryableError';
-        }
-    }
-    return { NonRetryableError };
-});
-
 // Import after mocks are defined so vi.mocked() works
 const { Actor } = await import('apify');
 const { ApifyApiError } = await import('apify-client');
-const { NonRetryableError } = await import('@crawlee/core');
 
 // The real ApifyApiError takes (response, attempt); the mock above takes
 // just a message. Cast the constructor to the mock's actual runtime shape
@@ -49,6 +39,33 @@ function makeApiError(message: string, data: unknown): Error & { data: unknown }
     error.data = data;
     return error;
 }
+
+// pushDataWithSchemaRepair only recognises an error as repairable when it
+// carries this exact top-level shape (see isSchemaValidationError) — mirrors
+// what the real Apify API actually reports on a schema-validation 400.
+function createMockSchemaValidationError(
+    invalidItems: { itemPosition: number; validationErrors: ValidationError[] }[],
+) {
+    const error = new MockApifyApiError('Validation failed') as Error & {
+        type: string;
+        statusCode: number;
+        data: { invalidItems: typeof invalidItems };
+    };
+    error.type = 'schema-validation-error';
+    error.statusCode = 400;
+    error.data = { invalidItems };
+    return error;
+}
+
+// A root-level error (empty instancePath) that cleanItemFields can never
+// repair — there's no field to strip, so the item is dropped on round one
+// with no extra pushFn call. Keeps these tests to a single push attempt.
+const UNFIXABLE_ROOT_ERROR: ValidationError = {
+    instancePath: '',
+    keyword: 'type',
+    params: { type: 'object' },
+    message: 'must be object',
+};
 
 describe('safePushData', () => {
     let mockDataset: { pushData: ReturnType<typeof vi.fn> };
@@ -108,22 +125,43 @@ describe('safePushData', () => {
     });
 
     describe('error handling', () => {
-        it('wraps ApifyApiError with invalidItems into NonRetryableError (default dataset)', async () => {
-            const apiError = makeApiError('Validation failed', {
-                invalidItems: [{ validationErrors: ['field required'] }],
-            });
+        it('drops an unfixable item, logs it, and resolves instead of throwing (default dataset)', async () => {
+            const apiError = createMockSchemaValidationError([
+                { itemPosition: 0, validationErrors: [UNFIXABLE_ROOT_ERROR] },
+            ]);
             vi.mocked(Actor.pushData).mockRejectedValueOnce(apiError as never);
 
-            await expect(safePushData([{ id: 1 }])).rejects.toBeInstanceOf(NonRetryableError);
+            const result = await safePushData([{ id: 1 }]);
+
+            expect(result).toBeUndefined();
+            expect(Actor.pushData).toHaveBeenCalledTimes(1);
+            expect(vi.mocked((await import('apify')).log.error)).toHaveBeenCalledWith(
+                'Dataset validation failed',
+                expect.objectContaining({ validationErrors: [UNFIXABLE_ROOT_ERROR] }),
+            );
         });
 
-        it('wraps ApifyApiError with invalidItems into NonRetryableError (named dataset)', async () => {
-            const apiError = makeApiError('Validation failed', {
-                invalidItems: [{ validationErrors: ['field required'] }],
-            });
+        it('drops an unfixable item, logs it, and resolves instead of throwing (named dataset)', async () => {
+            const apiError = createMockSchemaValidationError([
+                { itemPosition: 0, validationErrors: [UNFIXABLE_ROOT_ERROR] },
+            ]);
             mockDataset.pushData.mockRejectedValueOnce(apiError);
 
-            await expect(safePushData([{ id: 1 }], { alias: 'ds' })).rejects.toBeInstanceOf(NonRetryableError);
+            const result = await safePushData([{ id: 1 }], { alias: 'ds' });
+
+            expect(result).toBeUndefined();
+            expect(mockDataset.pushData).toHaveBeenCalledTimes(1);
+        });
+
+        it('returns the NO_CHARGE_RESULT fallback when every item is dropped (eventName given)', async () => {
+            const apiError = createMockSchemaValidationError([
+                { itemPosition: 0, validationErrors: [UNFIXABLE_ROOT_ERROR] },
+            ]);
+            vi.mocked(Actor.pushData).mockRejectedValueOnce(apiError as never);
+
+            const result = await safePushData([{ id: 1 }], { eventName: 'place-scraped' });
+
+            expect(result).toEqual({ eventChargeLimitReached: false, chargedCount: 0, chargeableWithinLimit: {} });
         });
 
         it('rethrows ApifyApiError without invalidItems unchanged', async () => {
@@ -154,13 +192,13 @@ describe('safePushData', () => {
             await expect(safePushData([{ id: 1 }])).rejects.toBe(err);
         });
 
-        it('wraps a failing aliased push and never charges', async () => {
-            const apiError = makeApiError('Validation failed', {
-                invalidItems: [{ validationErrors: ['field required'] }],
-            });
+        it('never charges on a dropped aliased push', async () => {
+            const apiError = createMockSchemaValidationError([
+                { itemPosition: 0, validationErrors: [UNFIXABLE_ROOT_ERROR] },
+            ]);
             mockDataset.pushData.mockRejectedValueOnce(apiError);
 
-            await expect(safePushData([{ id: 1 }], { alias: 'ds' })).rejects.toThrow();
+            await safePushData([{ id: 1 }], { alias: 'ds' });
             expect(Actor.charge).not.toHaveBeenCalled();
         });
     });
