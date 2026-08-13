@@ -19,10 +19,10 @@ const { chargeableWithinLimit } = await safePushData(item, { eventName: 'result-
 await safePushData(item, { alias: 'competitorAnalysis' });
 ```
 
-It converts a dataset schema-validation failure into a `NonRetryableError`
-instead of leaving it to be retried indefinitely. `apify`, `apify-client`,
-and `@crawlee/core` are optional peer dependencies, needed only if you use
-this subpath.
+Items that fail dataset schema-validation are repaired where possible and
+dropped (with a logged error) otherwise, instead of failing the whole push —
+see `pushDataWithSchemaRepair`. `apify` and `apify-client` are optional peer
+dependencies, needed only if you use this subpath.
 
-Its test suite mocks `apify`/`apify-client`/`@crawlee/core` with Vitest's
-`vi.mock`, and runs as part of the same `npm test` as everything else.
+Its test suite mocks `apify`/`apify-client` with Vitest's `vi.mock`, and runs
+as part of the same `npm test` as everything else.
