@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+<!-- git-cliff-unreleased-start -->
+## 0.1.9 - **not yet released**
+
+### 🚀 Features
+
+- **gteam-internal:** Add item information to error message ([#14](https://github.com/apify/apify-actor-utils/pull/14)) ([ca536f1](https://github.com/apify/apify-actor-utils/commit/ca536f1abbbd1ef318d9b64b37f7303ea578c528)) by [@radimkvet](https://github.com/radimkvet)
+
+
+<!-- git-cliff-unreleased-end -->
 ## [0.1.8](https://github.com/apify/apify-actor-utils/releases/tag/v0.1.8) (2026-08-13)
 
 ### 🚀 Features
