@@ -25,7 +25,7 @@ async function wrapPushData<T extends object, R>(
     const msg = 'Dataset validation failed';
     const { droppedItems, pushResult } = await pushDataWithSchemaRepair(pushFn, data);
     for (const { item, errors } of droppedItems) {
-        log.error(msg, { msg, validationErrors: errors, item });
+        log.error(msg, { msg, validationErrors: errors, item: JSON.stringify(item) });
     }
     return pushResult;
 }
