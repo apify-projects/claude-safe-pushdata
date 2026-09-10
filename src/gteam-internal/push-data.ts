@@ -24,8 +24,8 @@ async function wrapPushData<T extends object, R>(
 ): Promise<R | undefined> {
     const msg = 'Dataset validation failed';
     const { droppedItems, pushResult } = await pushDataWithSchemaRepair(pushFn, data);
-    for (const { errors } of droppedItems) {
-        log.error(msg, { msg, validationErrors: errors });
+    for (const { item, errors } of droppedItems) {
+        log.error(msg, { msg, validationErrors: errors, item: JSON.stringify(item) });
     }
     return pushResult;
 }
